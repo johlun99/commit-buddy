@@ -18,3 +18,7 @@ octocrab = "0.39"
 
 # OpenAI
 async-openai = "0.23"
+
+# TUI
+ratatui = "0.26"
+crossterm = "0.27"
