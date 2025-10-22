@@ -132,7 +132,7 @@ impl InteractiveCli {
                                 self.unstage_all_files().await?;
                             }
                             KeyCode::Esc => {
-                                self.exit_file_mode();
+                                self.exit_file_mode().await?;
                             }
                             _ => {}
                         }
@@ -856,10 +856,13 @@ impl InteractiveCli {
         Ok(())
     }
 
-    fn exit_file_mode(&mut self) {
+    async fn exit_file_mode(&mut self) -> Result<()> {
         self.in_file_mode = false;
         self.file_items.clear();
         self.file_list_state.select(None);
+        // Refresh git status to show updated file states
+        self.update_git_status().await?;
+        Ok(())
     }
 
     async fn load_file_items(&mut self) -> Result<()> {
@@ -942,6 +945,9 @@ impl InteractiveCli {
             
             // Reload file items to reflect changes
             self.load_file_items().await?;
+            
+            // Also refresh the main git status
+            self.update_git_status().await?;
         }
         
         Ok(())
@@ -950,12 +956,16 @@ impl InteractiveCli {
     async fn stage_all_files(&mut self) -> Result<()> {
         Command::new("git").args(&["add", "."]).status()?;
         self.load_file_items().await?;
+        // Refresh the main git status
+        self.update_git_status().await?;
         Ok(())
     }
 
     async fn unstage_all_files(&mut self) -> Result<()> {
         Command::new("git").args(&["reset", "HEAD", "--", "."]).status()?;
         self.load_file_items().await?;
+        // Refresh the main git status
+        self.update_git_status().await?;
         Ok(())
     }
 }
