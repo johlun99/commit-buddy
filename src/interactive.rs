@@ -181,6 +181,9 @@ impl InteractiveCli {
                                 KeyCode::Char('q') => {
                                     self.should_quit = true;
                                 }
+                                KeyCode::Char('c') => {
+                                    self.copy_to_clipboard().await?;
+                                }
                                 _ => {}
                             }
                         } else {
@@ -584,7 +587,7 @@ impl InteractiveCli {
         f.render_widget(content, chunks[1]);
 
         // Footer
-        let footer_text = "Press 'q' to quit | Esc to go back | ↑↓ to scroll";
+        let footer_text = "Press 'q' to quit | Esc to go back | 'c' to copy | ↑↓ to scroll";
         let footer = Paragraph::new(Text::styled(
             footer_text,
             Style::default().fg(Color::Gray),
@@ -759,6 +762,7 @@ impl InteractiveCli {
     fn get_current_menu_items(&self) -> Vec<&str> {
         match self.current_tab {
             0 => vec![
+                "📁 Browse files",
                 "📝 Add files to staging",
                 "💾 Commit changes",
                 "🚀 Push to remote",
@@ -769,6 +773,7 @@ impl InteractiveCli {
             ],
             1 => vec![
                 "✨ Generate PR description",
+                "🚀 Create PR with AI description",
                 "🧪 Generate unit tests",
                 "💬 Improve commit message",
                 "📝 Interactive commit",
@@ -1274,6 +1279,61 @@ impl InteractiveCli {
         self.in_display_mode = false;
         self.display_content.clear();
         self.display_title.clear();
+    }
+
+    async fn copy_to_clipboard(&mut self) -> Result<()> {
+        // Try to copy to clipboard using different methods
+        let content = format!("{}\n\n{}\n", self.display_title, self.display_content);
+        
+        // Method 1: Try using pbcopy on macOS
+        if cfg!(target_os = "macos") {
+            let mut child = std::process::Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // Method 2: Try using xclip on Linux
+        if cfg!(target_os = "linux") {
+            let mut child = std::process::Command::new("xclip")
+                .args(&["-selection", "clipboard"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // Method 3: Try using clip.exe on Windows
+        if cfg!(target_os = "windows") {
+            let mut child = std::process::Command::new("clip")
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // If no clipboard tool is available, show a message
+        // For now, we'll just return Ok() - could show a message in the future
+        Ok(())
     }
 
     async fn show_pr_description(&mut self) -> Result<()> {
