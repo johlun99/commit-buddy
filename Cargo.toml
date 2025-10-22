@@ -1,16 +1,19 @@
 [package]
 name = "commit-buddy"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-anyhow = "1.0.100"
-async-openai = "0.30.1"
-clap = "^4"
-crossterm = "0.29.0"
-git2 = "0.20.2"
-octocrab = "0.47.0"
-ratatui = "0.29.0"
-serde = "1.0.228"
-serde_json = "1.0.145"
-tokio = { version = "1.48.0", features = ["full"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+
+# Git & GitHub
+git2 = "0.18"
+octocrab = "0.39"
+
+# OpenAI
+async-openai = "0.23"
