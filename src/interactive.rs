@@ -20,6 +20,21 @@ use std::io;
 use std::process::Command;
 
 #[derive(Clone)]
+pub struct FileItem {
+    pub path: String,
+    pub status: FileStatus,
+    pub selected: bool,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum FileStatus {
+    Staged,
+    Modified,
+    Untracked,
+    Deleted,
+}
+
+#[derive(Clone)]
 pub struct GitStatus {
     pub branch: String,
     pub status: String,
@@ -37,6 +52,9 @@ pub struct InteractiveCli {
     pub commit_suggestions: Vec<String>,
     pub commit_list_state: ListState,
     pub in_commit_mode: bool,
+    pub in_file_mode: bool,
+    pub file_items: Vec<FileItem>,
+    pub file_list_state: ListState,
 }
 
 impl InteractiveCli {
@@ -56,6 +74,9 @@ impl InteractiveCli {
             commit_suggestions: Vec::new(),
             commit_list_state: ListState::default(),
             in_commit_mode: false,
+            in_file_mode: false,
+            file_items: Vec::new(),
+            file_list_state: ListState::default(),
         }
     }
 
@@ -93,6 +114,28 @@ impl InteractiveCli {
                             }
                             _ => {}
                         }
+                    } else if self.in_file_mode {
+                        match key.code {
+                            KeyCode::Up => {
+                                self.navigate_file_up();
+                            }
+                            KeyCode::Down => {
+                                self.navigate_file_down();
+                            }
+                            KeyCode::Char(' ') => {
+                                self.toggle_file_staging().await?;
+                            }
+                            KeyCode::Char('a') => {
+                                self.stage_all_files().await?;
+                            }
+                            KeyCode::Char('u') => {
+                                self.unstage_all_files().await?;
+                            }
+                            KeyCode::Esc => {
+                                self.exit_file_mode();
+                            }
+                            _ => {}
+                        }
                     } else {
                         match key.code {
                             KeyCode::Char('q') => {
@@ -115,6 +158,9 @@ impl InteractiveCli {
                             }
                             KeyCode::Char('r') => {
                                 self.update_git_status().await?;
+                            }
+                            KeyCode::Char('f') => {
+                                self.enter_file_mode().await?;
                             }
                             _ => {}
                         }
@@ -140,6 +186,8 @@ impl InteractiveCli {
     fn ui(&mut self, f: &mut Frame) {
         if self.in_commit_mode {
             self.render_commit_mode(f);
+        } else if self.in_file_mode {
+            self.render_file_mode(f);
         } else {
             self.render_main_ui(f);
         }
@@ -201,7 +249,7 @@ impl InteractiveCli {
         self.render_file_status(f, main_chunks[1]);
 
         // Footer
-        let footer_text = "Press 'q' to quit | 'r' to refresh | 'Tab' to switch tabs | ↑↓ to navigate | Enter to select";
+        let footer_text = "Press 'q' to quit | 'r' to refresh | 'f' for files | 'Tab' to switch tabs | ↑↓ to navigate | Enter to select";
         let footer = Paragraph::new(Text::styled(
             footer_text,
             Style::default().fg(Color::Gray),
@@ -287,12 +335,101 @@ impl InteractiveCli {
         f.render_widget(footer, chunks[3]);
     }
 
+    fn render_file_mode(&mut self, f: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Length(5), // Instructions
+                Constraint::Min(0),    // File list
+                Constraint::Length(3),  // Footer
+            ])
+            .split(f.size());
+
+        // Header
+        let header = Paragraph::new(Text::styled(
+            "📁 File Staging/Unstaging",
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(header, chunks[0]);
+
+        // Instructions
+        let instructions = Paragraph::new(Text::styled(
+            "Use ↑↓ to navigate files | Space to stage/unstage | 'a' to stage all | 'u' to unstage all | Esc to return",
+            Style::default().fg(Color::Yellow),
+        ))
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(instructions, chunks[1]);
+
+        // File list
+        let items: Vec<ListItem> = self.file_items
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                let status_icon = match file.status {
+                    FileStatus::Staged => "✅",
+                    FileStatus::Modified => "📝",
+                    FileStatus::Untracked => "❓",
+                    FileStatus::Deleted => "🗑️",
+                };
+                
+                let style = if self.file_list_state.selected() == Some(i) {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::REVERSED)
+                } else {
+                    match file.status {
+                        FileStatus::Staged => Style::default().fg(Color::Green),
+                        FileStatus::Modified => Style::default().fg(Color::Yellow),
+                        FileStatus::Untracked => Style::default().fg(Color::Red),
+                        FileStatus::Deleted => Style::default().fg(Color::Magenta),
+                    }
+                };
+                
+                ListItem::new(Line::from(Span::styled(
+                    format!("{} {}", status_icon, file.path),
+                    style,
+                )))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Files")
+                    .title_alignment(Alignment::Center),
+            )
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+
+        f.render_stateful_widget(list, chunks[2], &mut self.file_list_state);
+
+        // Footer
+        let footer_text = "Space: Toggle | 'a': Stage All | 'u': Unstage All | Esc: Back";
+        let footer = Paragraph::new(Text::styled(
+            footer_text,
+            Style::default().fg(Color::Gray),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(footer, chunks[3]);
+    }
+
     fn render_menu(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
         let tabs = vec!["Git Operations", "AI Features", "Utilities"];
         let current_tab = tabs[self.current_tab];
 
         let menu_items = match self.current_tab {
             0 => vec![
+                "📁 Manage files (f)",
                 "📝 Add files to staging",
                 "💾 Commit changes",
                 "🚀 Push to remote",
@@ -491,13 +628,14 @@ impl InteractiveCli {
 
     async fn handle_git_operation(&mut self, selected: usize) -> Result<()> {
         match selected {
-            0 => self.add_files_to_staging().await?,
-            1 => self.commit_changes().await?,
-            2 => self.push_to_remote().await?,
-            3 => self.pull_from_remote().await?,
-            4 => self.switch_branch().await?,
-            5 => self.merge_branch().await?,
-            6 => self.view_status().await?,
+            0 => self.enter_file_mode().await?,
+            1 => self.add_files_to_staging().await?,
+            2 => self.commit_changes().await?,
+            3 => self.push_to_remote().await?,
+            4 => self.pull_from_remote().await?,
+            5 => self.switch_branch().await?,
+            6 => self.merge_branch().await?,
+            7 => self.view_status().await?,
             _ => {}
         }
         Ok(())
@@ -708,5 +846,116 @@ impl InteractiveCli {
         self.in_commit_mode = false;
         self.commit_suggestions.clear();
         self.commit_list_state.select(None);
+    }
+
+    // File mode methods
+    async fn enter_file_mode(&mut self) -> Result<()> {
+        self.load_file_items().await?;
+        self.in_file_mode = true;
+        self.file_list_state.select(Some(0));
+        Ok(())
+    }
+
+    fn exit_file_mode(&mut self) {
+        self.in_file_mode = false;
+        self.file_items.clear();
+        self.file_list_state.select(None);
+    }
+
+    async fn load_file_items(&mut self) -> Result<()> {
+        self.file_items.clear();
+        
+        // Get git status
+        let output = Command::new("git")
+            .args(&["status", "--porcelain"])
+            .output()?;
+        let status_output = String::from_utf8_lossy(&output.stdout);
+
+        for line in status_output.lines() {
+            if line.len() >= 2 {
+                let status = &line[0..2];
+                let file = &line[3..];
+                
+                let file_status = match status {
+                    "A " | "M " | "D " => FileStatus::Staged,
+                    " M" | " D" => FileStatus::Modified,
+                    "??" => FileStatus::Untracked,
+                    "AM" | "MM" => FileStatus::Staged, // Show as staged if any part is staged
+                    _ => continue,
+                };
+                
+                self.file_items.push(FileItem {
+                    path: file.to_string(),
+                    status: file_status,
+                    selected: false,
+                });
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn navigate_file_up(&mut self) {
+        let current = self.file_list_state.selected().unwrap_or(0);
+        if current > 0 {
+            self.file_list_state.select(Some(current - 1));
+        } else {
+            self.file_list_state.select(Some(self.file_items.len() - 1));
+        }
+    }
+
+    fn navigate_file_down(&mut self) {
+        let current = self.file_list_state.selected().unwrap_or(0);
+        if current < self.file_items.len() - 1 {
+            self.file_list_state.select(Some(current + 1));
+        } else {
+            self.file_list_state.select(Some(0));
+        }
+    }
+
+    async fn toggle_file_staging(&mut self) -> Result<()> {
+        let selected = self.file_list_state.selected().unwrap_or(0);
+        
+        if selected < self.file_items.len() {
+            let file = &self.file_items[selected];
+            
+            match file.status {
+                FileStatus::Staged => {
+                    // Unstage the file
+                    Command::new("git")
+                        .args(&["reset", "HEAD", "--", &file.path])
+                        .status()?;
+                }
+                FileStatus::Modified | FileStatus::Untracked => {
+                    // Stage the file
+                    Command::new("git")
+                        .args(&["add", &file.path])
+                        .status()?;
+                }
+                FileStatus::Deleted => {
+                    // Handle deleted files
+                    Command::new("git")
+                        .args(&["rm", &file.path])
+                        .status()?;
+                }
+            }
+            
+            // Reload file items to reflect changes
+            self.load_file_items().await?;
+        }
+        
+        Ok(())
+    }
+
+    async fn stage_all_files(&mut self) -> Result<()> {
+        Command::new("git").args(&["add", "."]).status()?;
+        self.load_file_items().await?;
+        Ok(())
+    }
+
+    async fn unstage_all_files(&mut self) -> Result<()> {
+        Command::new("git").args(&["reset", "HEAD", "--", "."]).status()?;
+        self.load_file_items().await?;
+        Ok(())
     }
 }
