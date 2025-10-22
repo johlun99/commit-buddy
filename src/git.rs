@@ -309,7 +309,7 @@ fn get_staged_changes() -> Result<DiffInfo> {
     let head_commit = head.peel_to_commit()?;
     let head_tree = head_commit.tree()?;
     
-    let index = repo.index()?;
+    let mut index = repo.index()?;
     let index_tree_id = index.write_tree()?;
     let index_tree = repo.find_tree(index_tree_id)?;
     
