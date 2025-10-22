@@ -19,6 +19,7 @@ use crossterm::{
 };
 use std::io;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct FileItem {
@@ -59,6 +60,9 @@ pub struct InteractiveCli {
     pub in_display_mode: bool,
     pub display_content: String,
     pub display_title: String,
+    pub in_loading_mode: bool,
+    pub loading_message: String,
+    pub loading_spinner: usize,
 }
 
 impl InteractiveCli {
@@ -84,6 +88,9 @@ impl InteractiveCli {
             in_display_mode: false,
             display_content: String::new(),
             display_title: String::new(),
+            in_loading_mode: false,
+            loading_message: String::new(),
+            loading_spinner: 0,
         }
     }
 
@@ -100,86 +107,110 @@ impl InteractiveCli {
         self.list_state.select(Some(0));
 
         // Main event loop
+        let mut last_spinner_update = Instant::now();
         loop {
             terminal.draw(|f| self.ui(f))?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    if self.in_commit_mode {
-                        match key.code {
-                            KeyCode::Up => {
-                                self.navigate_commit_up();
+            // Update spinner if in loading mode
+            if self.in_loading_mode && last_spinner_update.elapsed() >= Duration::from_millis(100) {
+                self.loading_spinner = (self.loading_spinner + 1) % 10;
+                last_spinner_update = Instant::now();
+            }
+
+            // Use a timeout for event reading to allow spinner updates
+            let timeout = if self.in_loading_mode {
+                Duration::from_millis(50)
+            } else {
+                Duration::from_millis(100)
+            };
+
+            if event::poll(timeout)? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        if self.in_loading_mode {
+                            // Only allow quit during loading
+                            match key.code {
+                                KeyCode::Char('q') => {
+                                    self.should_quit = true;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Down => {
-                                self.navigate_commit_down();
+                        } else if self.in_commit_mode {
+                            match key.code {
+                                KeyCode::Up => {
+                                    self.navigate_commit_up();
+                                }
+                                KeyCode::Down => {
+                                    self.navigate_commit_down();
+                                }
+                                KeyCode::Enter => {
+                                    self.execute_commit().await?;
+                                }
+                                KeyCode::Esc => {
+                                    self.exit_commit_mode();
+                                }
+                                _ => {}
                             }
-                            KeyCode::Enter => {
-                                self.execute_commit().await?;
+                        } else if self.in_file_mode {
+                            match key.code {
+                                KeyCode::Up => {
+                                    self.navigate_file_up();
+                                }
+                                KeyCode::Down => {
+                                    self.navigate_file_down();
+                                }
+                                KeyCode::Char(' ') => {
+                                    self.toggle_file_staging().await?;
+                                }
+                                KeyCode::Char('a') => {
+                                    self.stage_all_files().await?;
+                                }
+                                KeyCode::Char('u') => {
+                                    self.unstage_all_files().await?;
+                                }
+                                KeyCode::Esc => {
+                                    self.exit_file_mode().await?;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Esc => {
-                                self.exit_commit_mode();
+                        } else if self.in_display_mode {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    self.exit_display_mode();
+                                }
+                                KeyCode::Char('q') => {
+                                    self.should_quit = true;
+                                }
+                                _ => {}
                             }
-                            _ => {}
-                        }
-                    } else if self.in_file_mode {
-                        match key.code {
-                            KeyCode::Up => {
-                                self.navigate_file_up();
+                        } else {
+                            match key.code {
+                                KeyCode::Char('q') => {
+                                    self.should_quit = true;
+                                }
+                                KeyCode::Up => {
+                                    self.navigate_up();
+                                }
+                                KeyCode::Down => {
+                                    self.navigate_down();
+                                }
+                                KeyCode::Tab => {
+                                    self.next_tab();
+                                }
+                                KeyCode::BackTab => {
+                                    self.prev_tab();
+                                }
+                                KeyCode::Enter => {
+                                    self.handle_selection().await?;
+                                }
+                                KeyCode::Char('r') => {
+                                    self.update_git_status().await?;
+                                }
+                                KeyCode::Char('f') => {
+                                    self.enter_file_mode().await?;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Down => {
-                                self.navigate_file_down();
-                            }
-                            KeyCode::Char(' ') => {
-                                self.toggle_file_staging().await?;
-                            }
-                            KeyCode::Char('a') => {
-                                self.stage_all_files().await?;
-                            }
-                            KeyCode::Char('u') => {
-                                self.unstage_all_files().await?;
-                            }
-                            KeyCode::Esc => {
-                                self.exit_file_mode().await?;
-                            }
-                            _ => {}
-                        }
-                    } else if self.in_display_mode {
-                        match key.code {
-                            KeyCode::Esc => {
-                                self.exit_display_mode();
-                            }
-                            KeyCode::Char('q') => {
-                                self.should_quit = true;
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        match key.code {
-                            KeyCode::Char('q') => {
-                                self.should_quit = true;
-                            }
-                            KeyCode::Up => {
-                                self.navigate_up();
-                            }
-                            KeyCode::Down => {
-                                self.navigate_down();
-                            }
-                            KeyCode::Tab => {
-                                self.next_tab();
-                            }
-                            KeyCode::BackTab => {
-                                self.prev_tab();
-                            }
-                            KeyCode::Enter => {
-                                self.handle_selection().await?;
-                            }
-                            KeyCode::Char('r') => {
-                                self.update_git_status().await?;
-                            }
-                            KeyCode::Char('f') => {
-                                self.enter_file_mode().await?;
-                            }
-                            _ => {}
                         }
                     }
                 }
@@ -201,7 +232,9 @@ impl InteractiveCli {
     }
 
     fn ui(&mut self, f: &mut Frame) {
-        if self.in_commit_mode {
+        if self.in_loading_mode {
+            self.render_loading_mode(f);
+        } else if self.in_commit_mode {
             self.render_commit_mode(f);
         } else if self.in_file_mode {
             self.render_file_mode(f);
@@ -440,6 +473,60 @@ impl InteractiveCli {
         .block(Block::default().borders(Borders::ALL));
 
         f.render_widget(footer, chunks[3]);
+    }
+
+    fn render_loading_mode(&mut self, f: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Loading content
+                Constraint::Length(3),  // Footer
+            ])
+            .split(f.size());
+
+        // Header
+        let header = Paragraph::new(Text::styled(
+            "🤖 AI Processing",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(header, chunks[0]);
+
+        // Loading content with spinner
+        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spinner = spinner_chars[self.loading_spinner % spinner_chars.len()];
+        
+        let loading_text = format!(
+            "{}\n\n{}\n\nPlease wait while AI processes your request...",
+            spinner,
+            self.loading_message
+        );
+
+        let content = Paragraph::new(Text::styled(
+            loading_text,
+            Style::default().fg(Color::Yellow),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(content, chunks[1]);
+
+        // Footer
+        let footer_text = "AI is working... Please wait";
+        let footer = Paragraph::new(Text::styled(
+            footer_text,
+            Style::default().fg(Color::Gray),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(footer, chunks[2]);
     }
 
     fn render_display_mode(&mut self, f: &mut Frame) {
@@ -870,14 +957,23 @@ impl InteractiveCli {
     async fn start_interactive_commit(&mut self, all: bool) -> Result<()> {
         if all {
             // Stage all changes
-            Command::new("git").args(&["add", "."]).status()?;
+            let output = Command::new("git")
+                .args(&["add", "."])
+                .output()?;
+            
+            if output.status.success() {
+                // Files staged successfully
+            }
         }
+
+        self.start_loading("Generating commit suggestions...".to_string());
 
         // Get staged changes and generate AI suggestions
         let diff_info = git::get_staged_changes()?;
         
         if diff_info.commits.is_empty() {
             // No staged changes, show message and return
+            self.stop_loading();
             return Ok(());
         }
 
@@ -892,6 +988,8 @@ impl InteractiveCli {
                 "chore: update code".to_string(),
             ];
         }
+
+        self.stop_loading();
 
         // Enter commit mode
         self.in_commit_mode = true;
@@ -1112,6 +1210,8 @@ impl InteractiveCli {
             return Ok(());
         }
 
+        self.start_loading("Creating PR with AI description...".to_string());
+
         // Get current branch
         let output = Command::new("git")
             .args(&["branch", "--show-current"])
@@ -1140,6 +1240,8 @@ impl InteractiveCli {
         // Create the PR
         let _pr_url = github::create_pull_request(&github_config, &pr_info).await?;
 
+        self.stop_loading();
+
         // Could show success message in TUI
         // For now, the PR is created successfully
         
@@ -1154,9 +1256,13 @@ impl InteractiveCli {
     }
 
     async fn show_pr_description(&mut self) -> Result<()> {
+        self.start_loading("Generating PR description...".to_string());
+        
         let base_branch = self.config.get_default_branch();
         let diff_info = git::get_diff_info(base_branch)?;
         let description = ai::generate_pr_description(&diff_info, &self.config).await?;
+        
+        self.stop_loading();
         
         self.display_title = "📋 AI-Generated PR Description".to_string();
         self.display_content = description;
@@ -1166,9 +1272,13 @@ impl InteractiveCli {
     }
 
     async fn show_generated_tests(&mut self) -> Result<()> {
+        self.start_loading("Generating unit tests...".to_string());
+        
         let base_branch = self.config.get_default_branch();
         let diff_info = git::get_diff_info(base_branch)?;
         let tests = ai::generate_tests(&diff_info, "auto", &self.config).await?;
+        
+        self.stop_loading();
         
         self.display_title = "🧪 AI-Generated Unit Tests".to_string();
         self.display_content = tests;
@@ -1178,7 +1288,11 @@ impl InteractiveCli {
     }
 
     async fn show_improved_commit_message(&mut self) -> Result<()> {
+        self.start_loading("Improving commit message...".to_string());
+        
         let message = ai::improve_commit_message("HEAD", &self.config).await?;
+        
+        self.stop_loading();
         
         self.display_title = "💬 AI-Improved Commit Message".to_string();
         self.display_content = message;
@@ -1188,9 +1302,13 @@ impl InteractiveCli {
     }
 
     async fn show_changelog(&mut self) -> Result<()> {
+        self.start_loading("Generating changelog...".to_string());
+        
         let base_branch = self.config.get_default_branch();
         let diff_info = git::get_diff_info(base_branch)?;
         let changelog = ai::generate_changelog(&diff_info, &self.config).await?;
+        
+        self.stop_loading();
         
         self.display_title = "📋 AI-Generated Changelog".to_string();
         self.display_content = changelog;
@@ -1200,14 +1318,31 @@ impl InteractiveCli {
     }
 
     async fn show_code_review(&mut self) -> Result<()> {
+        self.start_loading("Performing code review...".to_string());
+        
         let base_branch = self.config.get_default_branch();
         let diff_info = git::get_diff_info(base_branch)?;
         let review = ai::code_review(&diff_info, &self.config).await?;
+        
+        self.stop_loading();
         
         self.display_title = "🔍 AI Code Review".to_string();
         self.display_content = review;
         self.in_display_mode = true;
         
         Ok(())
+    }
+
+    // Loading helper methods
+    fn start_loading(&mut self, message: String) {
+        self.in_loading_mode = true;
+        self.loading_message = message;
+        self.loading_spinner = 0;
+    }
+
+    fn stop_loading(&mut self) {
+        self.in_loading_mode = false;
+        self.loading_message.clear();
+        self.loading_spinner = 0;
     }
 }
