@@ -716,7 +716,14 @@ impl InteractiveCli {
 
     async fn add_files_to_staging(&mut self) -> Result<()> {
         // Simple implementation - stage all changes
-        Command::new("git").args(&["add", "."]).status()?;
+        let output = Command::new("git")
+            .args(&["add", "."])
+            .output()?;
+        
+        if output.status.success() {
+            // Files staged successfully
+        }
+        
         Ok(())
     }
 
@@ -726,24 +733,60 @@ impl InteractiveCli {
     }
 
     async fn push_to_remote(&mut self) -> Result<()> {
-        Command::new("git").args(&["push"]).status()?;
+        let output = Command::new("git")
+            .args(&["push"])
+            .output()?;
+        
+        if output.status.success() {
+            // Push successful
+        } else {
+            // Push failed - could show error message in TUI
+        }
+        
         Ok(())
     }
 
     async fn pull_from_remote(&mut self) -> Result<()> {
-        Command::new("git").args(&["pull"]).status()?;
+        let output = Command::new("git")
+            .args(&["pull"])
+            .output()?;
+        
+        if output.status.success() {
+            // Pull successful
+        } else {
+            // Pull failed - could show error message in TUI
+        }
+        
         Ok(())
     }
 
     async fn switch_branch(&mut self) -> Result<()> {
         // Simple implementation - could be enhanced with branch selection
-        Command::new("git").args(&["checkout", "-b", "new-branch"]).status()?;
+        let output = Command::new("git")
+            .args(&["checkout", "-b", "new-branch"])
+            .output()?;
+        
+        if output.status.success() {
+            // Branch created successfully
+        } else {
+            // Branch creation failed
+        }
+        
         Ok(())
     }
 
     async fn merge_branch(&mut self) -> Result<()> {
         // Simple implementation
-        Command::new("git").args(&["merge", "main"]).status()?;
+        let output = Command::new("git")
+            .args(&["merge", "main"])
+            .output()?;
+        
+        if output.status.success() {
+            // Merge successful
+        } else {
+            // Merge failed
+        }
+        
         Ok(())
     }
 
@@ -925,21 +968,33 @@ impl InteractiveCli {
             match file.status {
                 FileStatus::Staged => {
                     // Unstage the file
-                    Command::new("git")
+                    let output = Command::new("git")
                         .args(&["reset", "HEAD", "--", &file.path])
-                        .status()?;
+                        .output()?;
+                    
+                    if output.status.success() {
+                        // File unstaged successfully - status will be updated by refresh
+                    }
                 }
                 FileStatus::Modified | FileStatus::Untracked => {
                     // Stage the file
-                    Command::new("git")
+                    let output = Command::new("git")
                         .args(&["add", &file.path])
-                        .status()?;
+                        .output()?;
+                    
+                    if output.status.success() {
+                        // File staged successfully - status will be updated by refresh
+                    }
                 }
                 FileStatus::Deleted => {
                     // Handle deleted files
-                    Command::new("git")
+                    let output = Command::new("git")
                         .args(&["rm", &file.path])
-                        .status()?;
+                        .output()?;
+                    
+                    if output.status.success() {
+                        // File removed successfully - status will be updated by refresh
+                    }
                 }
             }
             
@@ -954,7 +1009,14 @@ impl InteractiveCli {
     }
 
     async fn stage_all_files(&mut self) -> Result<()> {
-        Command::new("git").args(&["add", "."]).status()?;
+        let output = Command::new("git")
+            .args(&["add", "."])
+            .output()?;
+        
+        if output.status.success() {
+            // Files staged successfully
+        }
+        
         self.load_file_items().await?;
         // Refresh the main git status
         self.update_git_status().await?;
@@ -962,7 +1024,14 @@ impl InteractiveCli {
     }
 
     async fn unstage_all_files(&mut self) -> Result<()> {
-        Command::new("git").args(&["reset", "HEAD", "--", "."]).status()?;
+        let output = Command::new("git")
+            .args(&["reset", "HEAD", "--", "."])
+            .output()?;
+        
+        if output.status.success() {
+            // Files unstaged successfully
+        }
+        
         self.load_file_items().await?;
         // Refresh the main git status
         self.update_git_status().await?;
