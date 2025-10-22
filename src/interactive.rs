@@ -2,6 +2,7 @@ use anyhow::Result;
 use crate::config::Config;
 use crate::git;
 use crate::ai;
+use crate::github;
 use git2;
 use ratatui::{
     backend::CrosstermBackend,
@@ -55,6 +56,9 @@ pub struct InteractiveCli {
     pub in_file_mode: bool,
     pub file_items: Vec<FileItem>,
     pub file_list_state: ListState,
+    pub in_display_mode: bool,
+    pub display_content: String,
+    pub display_title: String,
 }
 
 impl InteractiveCli {
@@ -77,6 +81,9 @@ impl InteractiveCli {
             in_file_mode: false,
             file_items: Vec::new(),
             file_list_state: ListState::default(),
+            in_display_mode: false,
+            display_content: String::new(),
+            display_title: String::new(),
         }
     }
 
@@ -136,6 +143,16 @@ impl InteractiveCli {
                             }
                             _ => {}
                         }
+                    } else if self.in_display_mode {
+                        match key.code {
+                            KeyCode::Esc => {
+                                self.exit_display_mode();
+                            }
+                            KeyCode::Char('q') => {
+                                self.should_quit = true;
+                            }
+                            _ => {}
+                        }
                     } else {
                         match key.code {
                             KeyCode::Char('q') => {
@@ -188,6 +205,8 @@ impl InteractiveCli {
             self.render_commit_mode(f);
         } else if self.in_file_mode {
             self.render_file_mode(f);
+        } else if self.in_display_mode {
+            self.render_display_mode(f);
         } else {
             self.render_main_ui(f);
         }
@@ -423,6 +442,51 @@ impl InteractiveCli {
         f.render_widget(footer, chunks[3]);
     }
 
+    fn render_display_mode(&mut self, f: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Content
+                Constraint::Length(3),  // Footer
+            ])
+            .split(f.size());
+
+        // Header
+        let header = Paragraph::new(Text::styled(
+            &self.display_title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(header, chunks[0]);
+
+        // Content
+        let content = Paragraph::new(Text::styled(
+            &self.display_content,
+            Style::default().fg(Color::White),
+        ))
+        .block(Block::default().borders(Borders::ALL))
+        .wrap(ratatui::widgets::Wrap { trim: true });
+
+        f.render_widget(content, chunks[1]);
+
+        // Footer
+        let footer_text = "Press 'q' to quit | Esc to go back | ↑↓ to scroll";
+        let footer = Paragraph::new(Text::styled(
+            footer_text,
+            Style::default().fg(Color::Gray),
+        ))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+
+        f.render_widget(footer, chunks[2]);
+    }
+
     fn render_menu(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
         let tabs = vec!["Git Operations", "AI Features", "Utilities"];
         let current_tab = tabs[self.current_tab];
@@ -440,6 +504,7 @@ impl InteractiveCli {
             ],
             1 => vec![
                 "✨ Generate PR description",
+                "🚀 Create PR with AI description",
                 "🧪 Generate unit tests",
                 "💬 Improve commit message",
                 "📝 Interactive commit",
@@ -643,12 +708,13 @@ impl InteractiveCli {
 
     async fn handle_ai_operation(&mut self, selected: usize) -> Result<()> {
         match selected {
-            0 => git::generate_pr_description("master", "markdown", &self.config).await?,
-            1 => git::generate_tests("master", "auto", &self.config).await?,
-            2 => git::improve_commit_message(None, &self.config).await?,
-            3 => git::interactive_commit(false, &self.config).await?,
-            4 => git::generate_changelog("master", None, &self.config).await?,
-            5 => git::code_review("master", &self.config).await?,
+            0 => self.show_pr_description().await?,
+            1 => self.create_pr_with_ai_description().await?,
+            2 => self.show_generated_tests().await?,
+            3 => self.show_improved_commit_message().await?,
+            4 => git::interactive_commit(false, &self.config).await?,
+            5 => self.show_changelog().await?,
+            6 => self.show_code_review().await?,
             _ => {}
         }
         Ok(())
@@ -1035,6 +1101,113 @@ impl InteractiveCli {
         self.load_file_items().await?;
         // Refresh the main git status
         self.update_git_status().await?;
+        Ok(())
+    }
+
+    // PR creation method
+    async fn create_pr_with_ai_description(&mut self) -> Result<()> {
+        // Check if GitHub token is available
+        if !self.config.has_github_token() {
+            // Could show a message in TUI about missing GitHub token
+            return Ok(());
+        }
+
+        // Get current branch
+        let output = Command::new("git")
+            .args(&["branch", "--show-current"])
+            .output()?;
+        let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // Get base branch (default to master)
+        let base_branch = self.config.get_default_branch();
+
+        // Generate PR description using AI
+        let diff_info = git::get_diff_info(base_branch)?;
+        let pr_description = ai::generate_pr_description(&diff_info, &self.config).await?;
+
+        // Get repository info
+        let github_config = github::load_github_config()?;
+        let _repo_info = github::get_repository_info(&github_config).await?;
+
+        // Create PR info
+        let pr_info = github::PullRequest {
+            title: format!("feat: {}", current_branch.replace('-', " ").replace('_', " ")),
+            body: pr_description,
+            head: current_branch.clone(),
+            base: base_branch.to_string(),
+        };
+
+        // Create the PR
+        let _pr_url = github::create_pull_request(&github_config, &pr_info).await?;
+
+        // Could show success message in TUI
+        // For now, the PR is created successfully
+        
+        Ok(())
+    }
+
+    // Display mode methods
+    fn exit_display_mode(&mut self) {
+        self.in_display_mode = false;
+        self.display_content.clear();
+        self.display_title.clear();
+    }
+
+    async fn show_pr_description(&mut self) -> Result<()> {
+        let base_branch = self.config.get_default_branch();
+        let diff_info = git::get_diff_info(base_branch)?;
+        let description = ai::generate_pr_description(&diff_info, &self.config).await?;
+        
+        self.display_title = "📋 AI-Generated PR Description".to_string();
+        self.display_content = description;
+        self.in_display_mode = true;
+        
+        Ok(())
+    }
+
+    async fn show_generated_tests(&mut self) -> Result<()> {
+        let base_branch = self.config.get_default_branch();
+        let diff_info = git::get_diff_info(base_branch)?;
+        let tests = ai::generate_tests(&diff_info, "auto", &self.config).await?;
+        
+        self.display_title = "🧪 AI-Generated Unit Tests".to_string();
+        self.display_content = tests;
+        self.in_display_mode = true;
+        
+        Ok(())
+    }
+
+    async fn show_improved_commit_message(&mut self) -> Result<()> {
+        let message = ai::improve_commit_message("HEAD", &self.config).await?;
+        
+        self.display_title = "💬 AI-Improved Commit Message".to_string();
+        self.display_content = message;
+        self.in_display_mode = true;
+        
+        Ok(())
+    }
+
+    async fn show_changelog(&mut self) -> Result<()> {
+        let base_branch = self.config.get_default_branch();
+        let diff_info = git::get_diff_info(base_branch)?;
+        let changelog = ai::generate_changelog(&diff_info, &self.config).await?;
+        
+        self.display_title = "📋 AI-Generated Changelog".to_string();
+        self.display_content = changelog;
+        self.in_display_mode = true;
+        
+        Ok(())
+    }
+
+    async fn show_code_review(&mut self) -> Result<()> {
+        let base_branch = self.config.get_default_branch();
+        let diff_info = git::get_diff_info(base_branch)?;
+        let review = ai::code_review(&diff_info, &self.config).await?;
+        
+        self.display_title = "🔍 AI Code Review".to_string();
+        self.display_content = review;
+        self.in_display_mode = true;
+        
         Ok(())
     }
 }

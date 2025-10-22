@@ -251,7 +251,7 @@ pub async fn code_review(base: &str, config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn get_diff_info(base: &str) -> Result<DiffInfo> {
+pub fn get_diff_info(base: &str) -> Result<DiffInfo> {
     let repo = Repository::open(".")?;
     let head = repo.head()?.peel_to_commit()?;
     let base_obj = repo.revparse_single(base)?;
