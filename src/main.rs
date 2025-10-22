@@ -5,6 +5,7 @@ mod git;
 mod ai;
 mod github;
 mod utils;
+mod config;
 
 #[derive(Parser)]
 #[command(name = "commit-buddy")]
@@ -19,8 +20,8 @@ struct Cli {
 enum Commands {
     /// Generate AI-powered PR description from commits
     PrDescription {
-        /// Base branch to compare against (default: main)
-        #[arg(short, long, default_value = "main")]
+        /// Base branch to compare against (default: master)
+        #[arg(short, long, default_value = "master")]
         base: String,
         /// Output format (markdown, json)
         #[arg(short, long, default_value = "markdown")]
@@ -28,8 +29,8 @@ enum Commands {
     },
     /// Generate unit tests for changed code
     GenerateTests {
-        /// Base branch to compare against (default: main)
-        #[arg(short, long, default_value = "main")]
+        /// Base branch to compare against (default: master)
+        #[arg(short, long, default_value = "master")]
         base: String,
         /// Test framework to use (jest, pytest, etc.)
         #[arg(short, long, default_value = "auto")]
@@ -49,8 +50,8 @@ enum Commands {
     },
     /// Generate changelog from commits
     Changelog {
-        /// Base branch to compare against (default: main)
-        #[arg(short, long, default_value = "main")]
+        /// Base branch to compare against (default: master)
+        #[arg(short, long, default_value = "master")]
         base: String,
         /// Output file (default: stdout)
         #[arg(short, long)]
@@ -58,8 +59,8 @@ enum Commands {
     },
     /// Code review assistance
     Review {
-        /// Base branch to compare against (default: main)
-        #[arg(short, long, default_value = "main")]
+        /// Base branch to compare against (default: master)
+        #[arg(short, long, default_value = "master")]
         base: String,
     },
 }
@@ -67,13 +68,24 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = config::Config::load()?;
 
     match cli.command {
         Commands::PrDescription { base, format } => {
-            git::generate_pr_description(&base, &format).await?;
+            let effective_base = if base == "master" { 
+                config.get_default_branch() 
+            } else { 
+                &base 
+            };
+            git::generate_pr_description(effective_base, &format).await?;
         }
         Commands::GenerateTests { base, framework } => {
-            git::generate_tests(&base, &framework).await?;
+            let effective_base = if base == "master" { 
+                config.get_default_branch() 
+            } else { 
+                &base 
+            };
+            git::generate_tests(effective_base, &framework).await?;
         }
         Commands::ImproveCommit { commit } => {
             git::improve_commit_message(commit.as_deref()).await?;
@@ -82,10 +94,20 @@ async fn main() -> Result<()> {
             git::interactive_commit(all).await?;
         }
         Commands::Changelog { base, output } => {
-            git::generate_changelog(&base, output.as_deref()).await?;
+            let effective_base = if base == "master" { 
+                config.get_default_branch() 
+            } else { 
+                &base 
+            };
+            git::generate_changelog(effective_base, output.as_deref()).await?;
         }
         Commands::Review { base } => {
-            git::code_review(&base).await?;
+            let effective_base = if base == "master" { 
+                config.get_default_branch() 
+            } else { 
+                &base 
+            };
+            git::code_review(effective_base).await?;
         }
     }
 

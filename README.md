@@ -29,7 +29,7 @@ cargo install --path .
 
 ### Generate PR Description
 ```bash
-# Generate PR description comparing to main branch
+# Generate PR description comparing to master branch (default)
 commit-buddy pr-description
 
 # Compare to a specific branch
@@ -85,11 +85,13 @@ commit-buddy review
 
 ### Environment Variables
 
+- `COMMIT_BUDDY_DEFAULT_BRANCH`: Default branch to compare against (default: master)
 - `OPENAI_API_KEY`: Your OpenAI API key for AI features
 - `GITHUB_TOKEN`: Your GitHub token for GitHub integration
 
 ### Example .env file
 ```env
+COMMIT_BUDDY_DEFAULT_BRANCH=master
 OPENAI_API_KEY=your_openai_api_key_here
 GITHUB_TOKEN=your_github_token_here
 ```
