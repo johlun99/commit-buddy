@@ -1,11 +1,8 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 
-mod git;
-mod ai;
-mod github;
-mod utils;
-mod config;
+// Re-export modules from lib
+use commit_buddy::*;
 
 #[derive(Parser)]
 #[command(name = "commit-buddy")]
