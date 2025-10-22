@@ -150,13 +150,48 @@ MIT License - see LICENSE file for details
 - [ ] More AI models support
 - [ ] Performance optimizations
 
+## AI Integration Status
+
+The tool is now ready for AI integration! Here's the current status:
+
+### ✅ **What's Working:**
+- **Configuration System**: Environment variable support for API keys
+- **Git Analysis**: Full commit and diff analysis
+- **CLI Interface**: Complete command structure
+- **Error Handling**: Graceful fallbacks when API key is missing
+
+### 🔧 **Setting Up AI Features:**
+
+1. **Get OpenAI API Key:**
+   - Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Create a new API key
+
+2. **Configure Environment:**
+   ```bash
+   # Create .env file
+   cp env.example .env
+   
+   # Edit .env and add your API key
+   OPENAI_API_KEY=your_actual_api_key_here
+   ```
+
+3. **Test AI Features:**
+   ```bash
+   # This will now use real AI
+   commit-buddy pr-description
+   ```
+
+### 🚀 **Current Behavior:**
+- **Without API Key**: Shows helpful message with instructions
+- **With API Key**: Makes real OpenAI API calls to GPT-4
+- **All Git Features**: Fully functional regardless of AI status
+
 ## Hackathon Notes
 
-This project was built during a hackathon focused on AI integration. The current implementation uses template-based responses for demonstration purposes. In a production environment, you would integrate with actual AI APIs like OpenAI's GPT models.
-
-The tool demonstrates:
+This project demonstrates:
 - Modern Rust CLI development with clap
 - Git repository analysis with git2
 - Structured command architecture
 - Extensible AI integration points
 - Professional documentation and user experience
+- Environment-based configuration system

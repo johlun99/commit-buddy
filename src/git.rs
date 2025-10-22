@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use git2::{Repository, Diff, DiffFormat};
 use serde::{Deserialize, Serialize};
 use crate::ai;
+use crate::config::Config;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommitInfo {
@@ -21,7 +22,7 @@ pub struct DiffInfo {
     pub total_deletions: i32,
 }
 
-pub async fn generate_pr_description(base: &str, format: &str) -> Result<()> {
+pub async fn generate_pr_description(base: &str, format: &str, config: &Config) -> Result<()> {
     println!("🔍 Analyzing commits since {}...", base);
     
     let diff_info = get_diff_info(base)?;
@@ -32,7 +33,7 @@ pub async fn generate_pr_description(base: &str, format: &str) -> Result<()> {
     }
 
     println!("📝 Generating AI-powered PR description...");
-    let description = ai::generate_pr_description(&diff_info).await?;
+    let description = ai::generate_pr_description(&diff_info, config).await?;
     
     match format {
         "json" => {
@@ -47,7 +48,7 @@ pub async fn generate_pr_description(base: &str, format: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn generate_tests(base: &str, framework: &str) -> Result<()> {
+pub async fn generate_tests(base: &str, framework: &str, config: &Config) -> Result<()> {
     println!("🔍 Analyzing code changes since {}...", base);
     
     let diff_info = get_diff_info(base)?;
@@ -58,13 +59,13 @@ pub async fn generate_tests(base: &str, framework: &str) -> Result<()> {
     }
 
     println!("🧪 Generating unit tests...");
-    let tests = ai::generate_tests(&diff_info, framework).await?;
+    let tests = ai::generate_tests(&diff_info, framework, config).await?;
     
     println!("\n{}", tests);
     Ok(())
 }
 
-pub async fn improve_commit_message(commit_hash: Option<&str>) -> Result<()> {
+pub async fn improve_commit_message(commit_hash: Option<&str>, config: &Config) -> Result<()> {
     let repo = Repository::open(".")?;
     let commit_hash = commit_hash.unwrap_or("HEAD");
     
@@ -79,7 +80,7 @@ pub async fn improve_commit_message(commit_hash: Option<&str>) -> Result<()> {
     println!("Current message: {}", message);
     println!("Author: {}", author);
     
-    let improved_message = ai::improve_commit_message(&message).await?;
+    let improved_message = ai::improve_commit_message(&message, config).await?;
     
     println!("\n💡 Suggested improved message:");
     println!("{}", improved_message);
@@ -87,7 +88,7 @@ pub async fn improve_commit_message(commit_hash: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub async fn interactive_commit(all: bool) -> Result<()> {
+pub async fn interactive_commit(all: bool, config: &Config) -> Result<()> {
     let repo = Repository::open(".")?;
     
     if all {
@@ -107,7 +108,7 @@ pub async fn interactive_commit(all: bool) -> Result<()> {
     }
     
     println!("🤖 Generating commit message suggestions...");
-    let suggestions = ai::generate_commit_suggestions(&diff_info).await?;
+    let suggestions = ai::generate_commit_suggestions(&diff_info, config).await?;
     
     println!("\n💡 Suggested commit messages:");
     for (i, suggestion) in suggestions.iter().enumerate() {
@@ -120,7 +121,7 @@ pub async fn interactive_commit(all: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn generate_changelog(base: &str, output: Option<&str>) -> Result<()> {
+pub async fn generate_changelog(base: &str, output: Option<&str>, config: &Config) -> Result<()> {
     println!("📋 Generating changelog since {}...", base);
     
     let diff_info = get_diff_info(base)?;
@@ -130,7 +131,7 @@ pub async fn generate_changelog(base: &str, output: Option<&str>) -> Result<()> 
         return Ok(());
     }
 
-    let changelog = ai::generate_changelog(&diff_info).await?;
+    let changelog = ai::generate_changelog(&diff_info, config).await?;
     
     match output {
         Some(file_path) => {
@@ -145,7 +146,7 @@ pub async fn generate_changelog(base: &str, output: Option<&str>) -> Result<()> 
     Ok(())
 }
 
-pub async fn code_review(base: &str) -> Result<()> {
+pub async fn code_review(base: &str, config: &Config) -> Result<()> {
     println!("🔍 Performing AI code review since {}...", base);
     
     let diff_info = get_diff_info(base)?;
@@ -155,7 +156,7 @@ pub async fn code_review(base: &str) -> Result<()> {
         return Ok(());
     }
 
-    let review = ai::code_review(&diff_info).await?;
+    let review = ai::code_review(&diff_info, config).await?;
     
     println!("\n{}", review);
     Ok(())

@@ -67,6 +67,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+    
     let cli = Cli::parse();
     let config = config::Config::load()?;
 
@@ -77,7 +80,7 @@ async fn main() -> Result<()> {
             } else { 
                 &base 
             };
-            git::generate_pr_description(effective_base, &format).await?;
+            git::generate_pr_description(effective_base, &format, &config).await?;
         }
         Commands::GenerateTests { base, framework } => {
             let effective_base = if base == "master" { 
@@ -85,13 +88,13 @@ async fn main() -> Result<()> {
             } else { 
                 &base 
             };
-            git::generate_tests(effective_base, &framework).await?;
+            git::generate_tests(effective_base, &framework, &config).await?;
         }
         Commands::ImproveCommit { commit } => {
-            git::improve_commit_message(commit.as_deref()).await?;
+            git::improve_commit_message(commit.as_deref(), &config).await?;
         }
         Commands::Commit { all } => {
-            git::interactive_commit(all).await?;
+            git::interactive_commit(all, &config).await?;
         }
         Commands::Changelog { base, output } => {
             let effective_base = if base == "master" { 
@@ -99,7 +102,7 @@ async fn main() -> Result<()> {
             } else { 
                 &base 
             };
-            git::generate_changelog(effective_base, output.as_deref()).await?;
+            git::generate_changelog(effective_base, output.as_deref(), &config).await?;
         }
         Commands::Review { base } => {
             let effective_base = if base == "master" { 
@@ -107,7 +110,7 @@ async fn main() -> Result<()> {
             } else { 
                 &base 
             };
-            git::code_review(effective_base).await?;
+            git::code_review(effective_base, &config).await?;
         }
     }
 
