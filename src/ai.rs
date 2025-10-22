@@ -13,11 +13,20 @@ use async_openai::{
     },
     config::OpenAIConfig,
 };
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AIResponse {
     pub content: String,
     pub confidence: Option<f32>,
+}
+
+#[derive(Debug)]
+struct ProjectInfo {
+    project_type: String,
+    test_framework: String,
+    test_directory: String,
 }
 
 pub async fn call_openai_api(system_prompt: &str, user_prompt: &str, config: &Config) -> Result<String> {
@@ -84,21 +93,252 @@ pub async fn generate_pr_description(diff_info: &DiffInfo, config: &Config) -> R
     call_openai_api(system_prompt, &user_prompt, config).await
 }
 
-pub async fn generate_tests(diff_info: &DiffInfo, framework: &str, config: &Config) -> Result<String> {
+pub async fn generate_tests(diff_info: &DiffInfo, _framework: &str, config: &Config) -> Result<String> {
     let code_changes = diff_info.commits.iter()
         .map(|c| format!("Commit {}: {}\nDiff:\n{}", &c.hash[..8], c.message, c.diff))
         .collect::<Vec<_>>()
         .join("\n\n");
     
-    let system_prompt = "You are an expert software engineer writing comprehensive unit tests. Generate well-structured unit tests with proper test cases, edge cases, error handling, and mocking for external dependencies.";
+    // Detect project type and determine appropriate test framework and directory structure
+    let project_info = detect_project_type(&diff_info);
+    
+    let system_prompt = "You are an expert software engineer writing comprehensive unit tests. Generate well-structured unit tests with proper test cases, edge cases, error handling, and mocking for external dependencies. Return ONLY the test code without any markdown formatting, explanations, or additional text.";
     
     let user_prompt = format!(
-        "Based on the following code changes, generate comprehensive unit tests using the {} framework:\n\n{}\n\nPlease generate:\n1. Unit tests for all new/modified functions\n2. Edge cases and error handling tests\n3. Integration tests if applicable\n4. Mocking for external dependencies\n5. Clear test descriptions and assertions\n\nFormat the tests as proper code blocks with syntax highlighting.",
-        framework,
-        code_changes
+        "Based on the following code changes, generate comprehensive unit tests for a {} project using {}:\n\n{}\n\nGenerate complete test files that can be saved directly to the {} directory. Include:\n1. Unit tests for all new/modified functions\n2. Edge cases and error handling tests\n3. Integration tests if applicable\n4. Mocking for external dependencies\n5. Clear test descriptions and assertions\n\nReturn only the raw test code, no explanations or markdown.",
+        project_info.project_type,
+        project_info.test_framework,
+        code_changes,
+        project_info.test_directory
     );
     
-    call_openai_api(system_prompt, &user_prompt, config).await
+    let test_content = call_openai_api(system_prompt, &user_prompt, config).await?;
+    
+    // Create the test directory if it doesn't exist
+    let test_dir = Path::new(&project_info.test_directory);
+    if !test_dir.exists() {
+        fs::create_dir_all(test_dir)?;
+        println!("📁 Created test directory: {}", project_info.test_directory);
+    }
+    
+    // Generate test files based on project type
+    match project_info.project_type.as_str() {
+        "Rust" => {
+            create_rust_tests(&test_content, test_dir)?;
+        }
+        "Python" => {
+            create_python_tests(&test_content, test_dir)?;
+        }
+        "JavaScript/TypeScript" => {
+            create_js_tests(&test_content, test_dir)?;
+        }
+        "Java" => {
+            create_java_tests(&test_content, test_dir)?;
+        }
+        "Go" => {
+            create_go_tests(&test_content, test_dir)?;
+        }
+        "C/C++" => {
+            create_cpp_tests(&test_content, test_dir)?;
+        }
+        "C#" => {
+            create_csharp_tests(&test_content, test_dir)?;
+        }
+        _ => {
+            create_generic_tests(&test_content, test_dir)?;
+        }
+    }
+    
+    Ok(format!("✅ Tests generated successfully in {} directory using {} framework!", 
+               project_info.test_directory, project_info.test_framework))
+}
+
+fn detect_project_type(diff_info: &DiffInfo) -> ProjectInfo {
+    let mut project_type = "Unknown";
+    let mut test_framework = "generic";
+    let mut test_directory = "tests/";
+    
+    // Analyze file extensions and patterns to detect project type
+    let file_extensions: std::collections::HashSet<String> = diff_info.commits.iter()
+        .flat_map(|c| &c.files_changed)
+        .map(|f| {
+            f.split('.')
+                .last()
+                .unwrap_or("")
+                .to_lowercase()
+        })
+        .collect();
+    
+    // Check for Rust project
+    if file_extensions.contains("rs") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains("Cargo.toml"))) {
+        project_type = "Rust";
+        test_framework = "cargo test";
+        test_directory = "tests/";
+    }
+    // Check for Python project
+    else if file_extensions.contains("py") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains("requirements.txt") || f.contains("setup.py") || f.contains("pyproject.toml"))) {
+        project_type = "Python";
+        test_framework = "pytest";
+        test_directory = "tests/";
+    }
+    // Check for JavaScript/Node.js project
+    else if file_extensions.contains("js") || file_extensions.contains("ts") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains("package.json"))) {
+        project_type = "JavaScript/TypeScript";
+        test_framework = "jest";
+        test_directory = "__tests__/ or tests/";
+    }
+    // Check for Java project
+    else if file_extensions.contains("java") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains("pom.xml") || f.contains("build.gradle"))) {
+        project_type = "Java";
+        test_framework = "JUnit";
+        test_directory = "src/test/java/";
+    }
+    // Check for Go project
+    else if file_extensions.contains("go") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains("go.mod"))) {
+        project_type = "Go";
+        test_framework = "go test";
+        test_directory = "same package as source files";
+    }
+    // Check for C/C++ project
+    else if file_extensions.contains("c") || file_extensions.contains("cpp") || file_extensions.contains("h") || file_extensions.contains("hpp") {
+        project_type = "C/C++";
+        test_framework = "Google Test or Catch2";
+        test_directory = "tests/";
+    }
+    // Check for C# project
+    else if file_extensions.contains("cs") || diff_info.commits.iter().any(|c| c.files_changed.iter().any(|f| f.contains(".csproj") || f.contains(".sln"))) {
+        project_type = "C#";
+        test_framework = "NUnit or xUnit";
+        test_directory = "Tests/";
+    }
+    
+    ProjectInfo {
+        project_type: project_type.to_string(),
+        test_framework: test_framework.to_string(),
+        test_directory: test_directory.to_string(),
+    }
+}
+
+fn create_rust_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    // For Rust, create individual test files for each module
+    let test_files = vec![
+        ("ai_tests.rs", "AI module tests"),
+        ("git_tests.rs", "Git module tests"),
+        ("config_tests.rs", "Config module tests"),
+        ("github_tests.rs", "GitHub module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_python_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("test_ai.py", "AI module tests"),
+        ("test_git.py", "Git module tests"),
+        ("test_config.py", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("# {}\n# Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_js_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("ai.test.js", "AI module tests"),
+        ("git.test.js", "Git module tests"),
+        ("config.test.js", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_java_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("AiTests.java", "AI module tests"),
+        ("GitTests.java", "Git module tests"),
+        ("ConfigTests.java", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_go_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("ai_test.go", "AI module tests"),
+        ("git_test.go", "Git module tests"),
+        ("config_test.go", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_cpp_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("ai_tests.cpp", "AI module tests"),
+        ("git_tests.cpp", "Git module tests"),
+        ("config_tests.cpp", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_csharp_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let test_files = vec![
+        ("AiTests.cs", "AI module tests"),
+        ("GitTests.cs", "Git module tests"),
+        ("ConfigTests.cs", "Config module tests"),
+    ];
+    
+    for (filename, description) in test_files {
+        let file_path = test_dir.join(filename);
+        let content = format!("// {}\n// Generated by commit-buddy\n\n{}", description, test_content);
+        fs::write(file_path, content)?;
+        println!("📝 Created test file: tests/{}", filename);
+    }
+    Ok(())
+}
+
+fn create_generic_tests(test_content: &str, test_dir: &Path) -> Result<()> {
+    let file_path = test_dir.join("tests.txt");
+    let content = format!("// Generic tests\n// Generated by commit-buddy\n\n{}", test_content);
+    fs::write(file_path, content)?;
+    println!("📝 Created test file: tests/tests.txt");
+    Ok(())
 }
 
 pub async fn improve_commit_message(message: &str, config: &Config) -> Result<String> {
