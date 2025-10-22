@@ -299,7 +299,7 @@ fn get_diff_info(base: &str) -> Result<DiffInfo> {
     })
 }
 
-fn get_staged_changes() -> Result<DiffInfo> {
+pub fn get_staged_changes() -> Result<DiffInfo> {
     let repo = Repository::open(".")?;
     
     let mut commits = Vec::new();
