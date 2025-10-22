@@ -6,3 +6,4 @@ pub mod ai;
 pub mod github;
 pub mod utils;
 pub mod config;
+pub mod test_linter;

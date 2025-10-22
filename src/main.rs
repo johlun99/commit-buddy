@@ -3,6 +3,8 @@ use anyhow::Result;
 
 // Re-export modules from lib
 use commit_buddy::*;
+pub mod interactive;
+pub mod test_linter;
 
 #[derive(Parser)]
 #[command(name = "commit-buddy")]
@@ -39,12 +41,18 @@ enum Commands {
         #[arg(short, long)]
         commit: Option<String>,
     },
-    /// Interactive commit message assistant
-    Commit {
-        /// Stage all changes before committing
-        #[arg(short, long)]
-        all: bool,
-    },
+        /// Interactive commit message assistant
+        Commit {
+            /// Stage all changes before committing
+            #[arg(short, long)]
+            all: bool,
+        },
+        /// AI-powered conventional commit
+        AiCommit {
+            /// Stage all changes before committing
+            #[arg(short, long)]
+            all: bool,
+        },
     /// Generate changelog from commits
     Changelog {
         /// Base branch to compare against (default: master)
@@ -54,12 +62,20 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
     },
-    /// Code review assistance
-    Review {
-        /// Base branch to compare against (default: master)
-        #[arg(short, long, default_value = "master")]
-        base: String,
-    },
+        /// Code review assistance
+        Review {
+            /// Base branch to compare against (default: master)
+            #[arg(short, long, default_value = "master")]
+            base: String,
+        },
+        /// Interactive CLI interface (LazyGit-inspired)
+        Interactive,
+        /// Lint and auto-fix AI-generated tests
+        LintTests {
+            /// Test directory to lint (default: tests/)
+            #[arg(short, long, default_value = "tests/")]
+            directory: String,
+        },
 }
 
 #[tokio::main]
@@ -90,9 +106,12 @@ async fn main() -> Result<()> {
         Commands::ImproveCommit { commit } => {
             git::improve_commit_message(commit.as_deref(), &config).await?;
         }
-        Commands::Commit { all } => {
-            git::interactive_commit(all, &config).await?;
-        }
+            Commands::Commit { all } => {
+                git::interactive_commit(all, &config).await?;
+            }
+            Commands::AiCommit { all } => {
+                git::ai_commit(all, &config).await?;
+            }
         Commands::Changelog { base, output } => {
             let effective_base = if base == "master" { 
                 config.get_default_branch() 
@@ -108,6 +127,15 @@ async fn main() -> Result<()> {
                 &base 
             };
             git::code_review(effective_base, &config).await?;
+        }
+        Commands::Interactive => {
+            let mut cli = interactive::InteractiveCli::new(config);
+            cli.run().await?;
+        }
+        Commands::LintTests { directory } => {
+            let mut linter = test_linter::TestLinter::new(config);
+            let results = linter.lint_and_fix_tests(&directory).await?;
+            linter.print_summary(&results);
         }
     }
 

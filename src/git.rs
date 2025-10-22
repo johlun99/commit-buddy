@@ -107,16 +107,105 @@ pub async fn interactive_commit(all: bool, config: &Config) -> Result<()> {
         return Ok(());
     }
     
-    println!("🤖 Generating commit message suggestions...");
+    println!("🤖 Generating conventional commit message suggestions...");
     let suggestions = ai::generate_commit_suggestions(&diff_info, config).await?;
     
-    println!("\n💡 Suggested commit messages:");
+    println!("\n💡 AI-Generated Conventional Commit Messages:");
     for (i, suggestion) in suggestions.iter().enumerate() {
         println!("{}. {}", i + 1, suggestion);
     }
     
-    // In a real implementation, you'd use a library like dialoguer for interactive selection
-    println!("\n✨ Use one of these suggestions with: git commit -m \"your message\"");
+    // Simple interactive selection
+    println!("\nSelect a commit message (1-3) or press Enter to skip:");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    
+    if let Ok(choice) = input.trim().parse::<usize>() {
+        if choice >= 1 && choice <= suggestions.len() {
+            let selected_message = &suggestions[choice - 1];
+            println!("\n🚀 Committing with message: {}", selected_message);
+            
+            // Perform the actual commit
+            let mut index = repo.index()?;
+            let tree_id = index.write_tree()?;
+            let tree = repo.find_tree(tree_id)?;
+            
+            let signature = repo.signature()?;
+            let head = repo.head()?;
+            let parent_commit = head.peel_to_commit()?;
+            
+            let commit_id = repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                selected_message,
+                &tree,
+                &[&parent_commit],
+            )?;
+            
+            println!("✅ Commit created successfully: {}", commit_id);
+            return Ok(());
+        }
+    }
+    
+    println!("❌ No commit performed. Use 'git commit -m \"your message\"' to commit manually.");
+    Ok(())
+}
+
+pub async fn ai_commit(all: bool, config: &Config) -> Result<()> {
+    let repo = Repository::open(".")?;
+    
+    if all {
+        println!("📁 Staging all changes...");
+        // Stage all changes
+        let mut index = repo.index()?;
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+    }
+    
+    // Get staged changes
+    let diff_info = get_staged_changes()?;
+    
+    if diff_info.commits.is_empty() {
+        println!("No staged changes found.");
+        return Ok(());
+    }
+    
+    println!("🤖 Analyzing changes and generating conventional commit message...");
+    let suggestions = ai::generate_commit_suggestions(&diff_info, config).await?;
+    
+    // Use the first (best) suggestion automatically
+    let commit_message = &suggestions[0];
+    println!("📝 Generated commit message: {}", commit_message);
+    
+    // Show all options for reference
+    println!("\n💡 All AI suggestions:");
+    for (i, suggestion) in suggestions.iter().enumerate() {
+        println!("{}. {}", i + 1, suggestion);
+    }
+    
+    println!("\n🚀 Committing with AI-generated message...");
+    
+    // Perform the actual commit
+    let mut index = repo.index()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    
+    let signature = repo.signature()?;
+    let head = repo.head()?;
+    let parent_commit = head.peel_to_commit()?;
+    
+    let commit_id = repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        commit_message,
+        &tree,
+        &[&parent_commit],
+    )?;
+    
+    println!("✅ Commit created successfully: {}", commit_id);
+    println!("📋 Message: {}", commit_message);
     
     Ok(())
 }
@@ -215,8 +304,17 @@ fn get_staged_changes() -> Result<DiffInfo> {
     
     let mut commits = Vec::new();
     
-    // Get staged changes
-    let diff = repo.diff_index_to_workdir(None, None)?;
+    // Get staged changes by comparing HEAD to index
+    let head = repo.head()?;
+    let head_commit = head.peel_to_commit()?;
+    let head_tree = head_commit.tree()?;
+    
+    let index = repo.index()?;
+    let index_tree_id = index.write_tree()?;
+    let index_tree = repo.find_tree(index_tree_id)?;
+    
+    // Compare HEAD tree to index tree to get staged changes
+    let diff = repo.diff_tree_to_tree(Some(&head_tree), Some(&index_tree), None)?;
     let diff_str = format_diff(&diff)?;
     let files_changed = get_files_changed(&diff_str);
     
