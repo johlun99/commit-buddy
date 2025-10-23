@@ -2,6 +2,14 @@
 
 An AI-powered git companion for enhanced development workflow. Commit Buddy helps you write better commit messages, generate PR descriptions, create unit tests, and more!
 
+## Disclaimer ☢️
+This is an unfinished product made during a hackathon. No time was spent on security, maintainability and so on. Proceed at own risk.
+
+Known issues:
+- Auto generating unit tests _works_ but openAI seems very fond of sending back tests with syntax errors making them unusable.
+- Loading state not rendering correctly.
+- Other stuff...
+
 ## Features
 
 - **📝 PR Description Generation**: Automatically generate comprehensive PR descriptions from commit messages and code changes
