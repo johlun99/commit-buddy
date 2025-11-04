@@ -2,6 +2,9 @@
 
 An AI-powered git companion for enhanced development workflow. Commit Buddy helps you write better commit messages, generate PR descriptions, create unit tests, and more!
 
+## DEMO
+In the files there is a demo-video which shows the functionallity of the project
+
 ## Features
 
 - **📝 PR Description Generation**: Automatically generate comprehensive PR descriptions from commit messages and code changes
