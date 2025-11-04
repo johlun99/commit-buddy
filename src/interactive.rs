@@ -181,6 +181,9 @@ impl InteractiveCli {
                                 KeyCode::Char('q') => {
                                     self.should_quit = true;
                                 }
+                                KeyCode::Char('c') => {
+                                    self.copy_to_clipboard().await?;
+                                }
                                 _ => {}
                             }
                         } else {
@@ -476,15 +479,36 @@ impl InteractiveCli {
     }
 
     fn render_loading_mode(&mut self, f: &mut Frame) {
-        let chunks = Layout::default()
+        // Render the normal UI first
+        if self.in_commit_mode {
+            self.render_commit_mode(f);
+        } else if self.in_file_mode {
+            self.render_file_mode(f);
+        } else if self.in_display_mode {
+            self.render_display_mode(f);
+        } else {
+            self.render_main_ui(f);
+        }
+
+        // Create a centered dialog overlay
+        let popup_area = centered_rect(60, 25, f.size());
+        
+        // Semi-transparent background
+        let background = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Black).fg(Color::White));
+        f.render_widget(background, popup_area);
+
+        // Inner content area
+        let inner_area = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
                 Constraint::Length(3), // Header
-                Constraint::Min(0),    // Loading content
-                Constraint::Length(3),  // Footer
+                Constraint::Min(0),    // Content
+                Constraint::Length(3), // Footer
             ])
-            .split(f.size());
+            .split(popup_area);
 
         // Header
         let header = Paragraph::new(Text::styled(
@@ -496,7 +520,7 @@ impl InteractiveCli {
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
 
-        f.render_widget(header, chunks[0]);
+        f.render_widget(header, inner_area[0]);
 
         // Loading content with spinner
         let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -515,7 +539,7 @@ impl InteractiveCli {
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
 
-        f.render_widget(content, chunks[1]);
+        f.render_widget(content, inner_area[1]);
 
         // Footer
         let footer_text = "AI is working... Please wait";
@@ -526,7 +550,7 @@ impl InteractiveCli {
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
 
-        f.render_widget(footer, chunks[2]);
+        f.render_widget(footer, inner_area[2]);
     }
 
     fn render_display_mode(&mut self, f: &mut Frame) {
@@ -563,7 +587,7 @@ impl InteractiveCli {
         f.render_widget(content, chunks[1]);
 
         // Footer
-        let footer_text = "Press 'q' to quit | Esc to go back | ↑↓ to scroll";
+        let footer_text = "Press 'q' to quit | Esc to go back | 'c' to copy | ↑↓ to scroll";
         let footer = Paragraph::new(Text::styled(
             footer_text,
             Style::default().fg(Color::Gray),
@@ -738,6 +762,7 @@ impl InteractiveCli {
     fn get_current_menu_items(&self) -> Vec<&str> {
         match self.current_tab {
             0 => vec![
+                "📁 Browse files",
                 "📝 Add files to staging",
                 "💾 Commit changes",
                 "🚀 Push to remote",
@@ -748,6 +773,7 @@ impl InteractiveCli {
             ],
             1 => vec![
                 "✨ Generate PR description",
+                "🚀 Create PR with AI description",
                 "🧪 Generate unit tests",
                 "💬 Improve commit message",
                 "📝 Interactive commit",
@@ -799,7 +825,7 @@ impl InteractiveCli {
             1 => self.create_pr_with_ai_description().await?,
             2 => self.show_generated_tests().await?,
             3 => self.show_improved_commit_message().await?,
-            4 => git::interactive_commit(false, &self.config).await?,
+            4 => self.start_interactive_commit(false).await?,
             5 => self.show_changelog().await?,
             6 => self.show_code_review().await?,
             _ => {}
@@ -1255,6 +1281,61 @@ impl InteractiveCli {
         self.display_title.clear();
     }
 
+    async fn copy_to_clipboard(&mut self) -> Result<()> {
+        // Try to copy to clipboard using different methods
+        let content = format!("{}\n\n{}\n", self.display_title, self.display_content);
+        
+        // Method 1: Try using pbcopy on macOS
+        if cfg!(target_os = "macos") {
+            let mut child = std::process::Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // Method 2: Try using xclip on Linux
+        if cfg!(target_os = "linux") {
+            let mut child = std::process::Command::new("xclip")
+                .args(&["-selection", "clipboard"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // Method 3: Try using clip.exe on Windows
+        if cfg!(target_os = "windows") {
+            let mut child = std::process::Command::new("clip")
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            
+            if let Some(stdin) = child.stdin.as_mut() {
+                use std::io::Write;
+                stdin.write_all(content.as_bytes())?;
+            }
+            
+            let _ = child.wait();
+            return Ok(());
+        }
+        
+        // If no clipboard tool is available, show a message
+        // For now, we'll just return Ok() - could show a message in the future
+        Ok(())
+    }
+
     async fn show_pr_description(&mut self) -> Result<()> {
         self.start_loading("Generating PR description...".to_string());
         
@@ -1345,4 +1426,25 @@ impl InteractiveCli {
         self.loading_message.clear();
         self.loading_spinner = 0;
     }
+}
+
+// Helper function to create a centered rectangle
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
